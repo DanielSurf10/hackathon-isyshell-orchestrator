@@ -1,0 +1,52 @@
+services:
+  orchestrator:
+    build:
+      context: ./orchestrator
+    ports:
+      - "8000:8000"
+    depends_on:
+      - api-a
+      - api-b
+      - whoami
+      - mock-worker
+    restart: unless-stopped
+
+  api-a:
+    image: hashicorp/http-echo:1.0.0
+    command:
+      - "-text=api-a"
+      - "-listen=:8080"
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+
+  api-b:
+    image: hashicorp/http-echo:1.0.0
+    command:
+      - "-text=api-b"
+      - "-listen=:8080"
+    ports:
+      - "8082:8080"
+    restart: unless-stopped
+
+  whoami:
+    image: traefik/whoami:v1.10.3
+    ports:
+      - "8083:80"
+    restart: unless-stopped
+
+  mock-worker:
+    image: alpine:3.20
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          echo "mock-worker alive"
+          sleep 30
+        done
+    restart: unless-stopped
+
+networks:
+  default:
+    name: orchestrator-test-net
