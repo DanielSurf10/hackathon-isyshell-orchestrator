@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
-from typing import List
-from .models import Script, ExecutionLog
+from ..models.schemas import Script, ExecutionLog
 
 SCRIPTS_DB = [
     Script(
