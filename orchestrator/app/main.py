@@ -5,8 +5,19 @@ from fastapi import Depends, FastAPI
 from .api.scripts import scripts_router
 from .core.sercurity import require_auth
 from .api.execution import execution_router
+from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
+from fastapi.responses import FileResponse
 
 app = FastAPI(title="Orchestrator", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Para o hackathon, aceitamos de qualquer lugar.
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(scripts_router, prefix="/api/v1")
@@ -14,9 +25,12 @@ app.include_router(execution_router, prefix="/api/v1")
 app.include_router(logs_router, prefix="/api/v1")
 
 
-@app.get("/")
-def read_root() -> dict[str, str]:
-    return {"service": "orchestrator", "status": "running"}
+BASE_DIR = Path(__file__).resolve().parent
+INDEX_FILE = BASE_DIR / "static" / "index.html"
+
+@app.get("/", include_in_schema=False)
+def read_root() -> FileResponse:
+    return FileResponse(INDEX_FILE)
 
 
 @app.get("/health")

@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IsyShell | Orquestrador</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .font-code { font-family: 'Courier New', Courier, monospace; }
+        .terminal-bg { background-color: #1e1e1e; border: 1px solid #333; }
+        .nav-tabs .nav-link { color: #aaa; }
+        .nav-tabs .nav-link.active { background-color: #1e1e1e; color: #0d6efd; border-color: #333 #333 #1e1e1e; }
+        #app-loader { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; justify-content: center; align-items: center; }
+    </style>
+</head>
+<body>
+
+    <div id="app-loader">
+        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+            <span class="visually-hidden">Carregando...</span>
+        </div>
+    </div>
+
+    <div id="login-view" class="container d-flex justify-content-center align-items-center vh-100">
+        <div class="card terminal-bg shadow-lg" style="width: 400px;">
+            <div class="card-body p-5 text-center">
+                <h2 class="fw-bold mb-4 font-code text-primary"><i class="fa-solid fa-terminal"></i> IsyShell</h2>
+                <p class="text-muted small mb-4">Autenticação de Operador</p>
+                <form id="login-form">
+                    <div class="mb-3">
+                        <input type="password" class="form-control bg-dark text-white border-secondary text-center font-code" id="permanentToken" placeholder="X-Isy-Token / Permanent Token" required minlength="8">
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 fw-bold">Acessar Orquestrador</button>
+                </form>
+                <div id="login-error" class="alert alert-danger mt-3 d-none small"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="dashboard-view" class="d-none">
+        <nav class="navbar navbar-dark bg-dark border-bottom border-secondary sticky-top">
+            <div class="container-fluid px-4">
+                <span class="navbar-brand font-code fw-bold text-primary"><i class="fa-solid fa-terminal"></i> IsyShell</span>
+                <button class="btn btn-sm btn-outline-danger" onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i> Sair</button>
+            </div>
+        </nav>
+
+        <div class="container mt-4">
+            <div id="dashboard-alert" class="alert d-none" role="alert"></div>
+
+            <ul class="nav nav-tabs mb-4" id="myTab" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active fw-bold" id="scripts-tab" data-bs-toggle="tab" data-bs-target="#scripts" type="button" role="tab">📦 Scripts (Admin)</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link fw-bold" id="logs-tab" data-bs-toggle="tab" data-bs-target="#logs" type="button" role="tab">📋 Auditoria de Logs</button>
+                </li>
+            </ul>
+
+            <div class="tab-content" id="myTabContent">
+
+                <div class="tab-pane fade show active" id="scripts" role="tabpanel" tabindex="0">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4 class="mb-0 text-white">Catálogo de Automação</h4>
+                        <div>
+                            <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#createScriptModal"><i class="fa-solid fa-plus"></i> Novo Script</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="loadScripts()"><i class="fa-solid fa-rotate-right"></i> Atualizar</button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-striped table-hover border border-secondary align-middle">
+                            <thead>
+                                <tr class="text-primary font-code">
+                                    <th>ID</th>
+                                    <th>Nome</th>
+                                    <th>Caminho (Path)</th>
+                                    <th>Status</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="scripts-table-body">
+                                </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="tab-pane fade" id="logs" role="tabpanel" tabindex="0">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4 class="mb-0 text-white">Trilha de Execução</h4>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="loadLogs()"><i class="fa-solid fa-rotate-right"></i> Atualizar</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-striped table-hover border border-secondary align-middle font-code small">
+                            <thead>
+                                <tr class="text-primary">
+                                    <th>Data/Hora</th>
+                                    <th>Script ID</th>
+                                    <th>Alvo (Container)</th>
+                                    <th>Status</th>
+                                    <th>Detalhes</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logs-table-body">
+                                </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="executeModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark text-white border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title font-code text-warning"><i class="fa-solid fa-play"></i> Disparar Execução</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="execute-form">
+                        <input type="hidden" id="exec-script-id">
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">Container Alvo</label>
+                            <input type="text" class="form-control bg-black text-white border-secondary font-code" id="exec-target" placeholder="ex: api-payment-01" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small">Argumentos (separados por espaço)</label>
+                            <input type="text" class="form-control bg-black text-white border-secondary font-code" id="exec-args" placeholder="ex: --force --clean">
+                        </div>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" role="switch" id="exec-background">
+                            <label class="form-check-label text-muted small" for="exec-background">Rodar em Background (Fire & Forget)</label>
+                        </div>
+                        <button type="submit" class="btn btn-warning w-100 fw-bold">Executar Agora</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        const API_BASE = '/api/v1';
+        let jwtToken = localStorage.getItem('isy_jwt');
+
+        // Helpers de UI
+        const showLoader = () => document.getElementById('app-loader').style.display = 'flex';
+        const hideLoader = () => document.getElementById('app-loader').style.display = 'none';
+        const showAlert = (msg, type) => {
+            const alertBox = document.getElementById('dashboard-alert');
+            alertBox.className = `alert alert-${type}`;
+            alertBox.textContent = msg;
+            alertBox.classList.remove('d-none');
+            setTimeout(() => alertBox.classList.add('d-none'), 5000);
+        };
+
+        // Roteamento Simples
+        const checkAuth = () => {
+            if (jwtToken) {
+                document.getElementById('login-view').classList.add('d-none');
+                document.getElementById('dashboard-view').classList.remove('d-none');
+                loadScripts();
+                loadLogs();
+            } else {
+                document.getElementById('login-view').classList.remove('d-none');
+                document.getElementById('dashboard-view').classList.add('d-none');
+            }
+        };
+
+        const logout = () => {
+            localStorage.removeItem('isy_jwt');
+            jwtToken = null;
+            checkAuth();
+        };
+
+        // Fetch Wrapper com injeção de Token
+        async function apiFetch(endpoint, options = {}) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (jwtToken) headers['Authorization'] = `Bearer ${jwtToken}`;
+
+            try {
+                const response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+
+                // Se o token expirar
+                if (response.status === 401 && endpoint !== '/auth/token') {
+                    logout();
+                    throw new Error("Sessão expirada. Faça login novamente.");
+                }
+                return response;
+            } catch (error) {
+                console.error("API Error:", error);
+                throw error;
+            }
+        }
+
+        // 1. Autenticação (POST /auth/token)
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const tokenInput = document.getElementById('permanentToken').value;
+            const errorBox = document.getElementById('login-error');
+
+            showLoader();
+            try {
+                const res = await apiFetch('/auth/token', {
+                    method: 'POST',
+                    body: JSON.stringify({ token: tokenInput })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    jwtToken = data.access_token;
+                    localStorage.setItem('isy_jwt', jwtToken);
+                    errorBox.classList.add('d-none');
+                    checkAuth();
+                } else {
+                    errorBox.textContent = "Acesso Negado: Token permanente inválido.";
+                    errorBox.classList.remove('d-none');
+                }
+            } finally { hideLoader(); }
+        });
+
+        // 2. Carregar Scripts (GET /admin/scripts)
+        async function loadScripts() {
+            showLoader();
+            const tbody = document.getElementById('scripts-table-body');
+            tbody.innerHTML = '';
+
+            try {
+                const res = await apiFetch('/admin/scripts');
+                if (res.ok) {
+                    const scripts = await res.json();
+                    scripts.forEach(s => {
+                        const statusBadge = s.is_active ? '<span class="badge bg-success">Ativo</span>' : '<span class="badge bg-danger">Inativo</span>';
+                        const toggleBtnClass = s.is_active ? 'btn-outline-danger' : 'btn-outline-success';
+                        const toggleIcon = s.is_active ? 'fa-ban' : 'fa-check';
+
+                        tbody.innerHTML += `
+                            <tr>
+                                <td>#${s.id}</td>
+                                <td><strong>${s.name}</strong><br><small class="text-muted">${s.description}</small></td>
+                                <td class="font-code text-info">${s.path}</td>
+                                <td>${statusBadge}</td>
+                                <td>
+                                    <button class="btn btn-sm btn-warning" onclick="openExecuteModal(${s.id})" ${!s.is_active ? 'disabled' : ''} title="Executar">
+                                        <i class="fa-solid fa-play"></i>
+                                    </button>
+                                    <button class="btn btn-sm ${toggleBtnClass}" onclick="toggleScriptStatus(${s.id}, ${!s.is_active})" title="Alternar Status">
+                                        <i class="fa-solid ${toggleIcon}"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                }
+            } finally { hideLoader(); }
+        }
+
+        // 3. Alternar Status do Script (PUT /admin/scripts/{id}/status)
+        async function toggleScriptStatus(id, newStatus) {
+            showLoader();
+            try {
+                const res = await apiFetch(`/admin/scripts/${id}/status`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ is_active: newStatus })
+                });
+                if (res.ok || res.status === 204) {
+                    showAlert(`Status do script #${id} atualizado.`, 'success');
+                    loadScripts();
+                } else {
+                    showAlert("Erro ao alterar status.", 'danger');
+                }
+            } finally { hideLoader(); }
+        }
+
+        // 4. Execução de Scripts (POST /ops/execute)
+        const execModal = new bootstrap.Modal(document.getElementById('executeModal'));
+
+        function openExecuteModal(scriptId) {
+            document.getElementById('exec-script-id').value = scriptId;
+            document.getElementById('execute-form').reset();
+            execModal.show();
+        }
+
+        document.getElementById('execute-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                script_id: parseInt(document.getElementById('exec-script-id').value),
+                target_container: document.getElementById('exec-target').value,
+                args: document.getElementById('exec-args').value.split(' ').filter(a => a.trim() !== ''),
+                run_in_background: document.getElementById('exec-background').checked
+            };
+
+            execModal.hide();
+            showLoader();
+
+            try {
+                const res = await apiFetch('/ops/execute', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    showAlert(`Sucesso: ${data.message} (Container: ${data.target_container})`, 'success');
+                } else {
+                    showAlert(`Falha na Execução: ${data.detail || 'Verifique o target ou argumentos.'}`, 'danger');
+                }
+
+                // Atualiza os logs logo após a execução
+                setTimeout(loadLogs, 1000);
+
+            } finally { hideLoader(); }
+        });
+
+        // 5. Carregar Logs de Auditoria (GET /admin/execution-logs)
+        async function loadLogs() {
+            const tbody = document.getElementById('logs-table-body');
+            tbody.innerHTML = '';
+
+            try {
+                const res = await apiFetch('/admin/execution-logs');
+                if (res.ok) {
+                    const logs = await res.json();
+                    // Inverte para mostrar os mais recentes primeiro
+                    logs.reverse().forEach(log => {
+                        const dateObj = new Date(log.executed_at);
+                        const dateStr = dateObj.toLocaleString('pt-BR');
+                        const statusColor = log.status === 0 ? 'text-success' : 'text-danger';
+                        const statusText = log.status === 0 ? '0 (OK)' : `${log.status} (ERR)`;
+
+                        // Formata o output para não estourar a tabela
+                        const cleanOutput = log.status === 0 ? log.output_log : log.output_error_log;
+                        const shortOutput = cleanOutput ? cleanOutput.substring(0, 50) + (cleanOutput.length > 50 ? '...' : '') : '-';
+
+                        tbody.innerHTML += `
+                            <tr>
+                                <td class="text-white">${dateStr}</td>
+                                <td>#${log.script_id}</td>
+                                <td class="text-info">${log.target_container}</td>
+                                <td class="fw-bold ${statusColor}">${statusText}</td>
+                                <td class="text-muted" title="${cleanOutput}">${shortOutput}</td>
+                            </tr>
+                        `;
+                    });
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        // Inicialização
+        checkAuth();
+    </script>
+</body>
+</html>

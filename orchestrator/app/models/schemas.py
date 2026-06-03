@@ -58,3 +58,9 @@ class ExecuteScriptResponse(BaseModel):
     script_id: int
     target_container: str
     time_stamp: datetime
+
+
+class ExecuteScriptManyRequest(BaseModel):
+    script_id: int
+    target_containers: list[str]
+    args: list[str] = []

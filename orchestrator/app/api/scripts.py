@@ -75,3 +75,4 @@ def update_script_status(
     script.is_active = body.is_active
 
     return None
+

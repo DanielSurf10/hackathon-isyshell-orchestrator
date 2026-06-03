@@ -3,6 +3,7 @@ services:
     build:
       context: ./orchestrator
     volumes:
+      - ./script_tests:/scripts
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8000:8000"
@@ -20,6 +21,8 @@ services:
       - "-listen=:8080"
     ports:
       - "8081:8080"
+    volumes:
+      - ./script_tests:/scripts
     restart: unless-stopped
 
   api-b:
@@ -29,12 +32,16 @@ services:
       - "-listen=:8080"
     ports:
       - "8082:8080"
+    volumes:
+      - ./script_tests:/scripts
     restart: unless-stopped
 
   whoami:
     image: traefik/whoami:v1.10.3
     ports:
       - "8083:80"
+    volumes:
+      - ./script_tests:/scripts
     restart: unless-stopped
 
   mock-worker:
@@ -47,6 +54,8 @@ services:
           echo "mock-worker alive"
           sleep 30
         done
+    volumes:
+      - ./script_tests:/scripts
     restart: unless-stopped
 
 networks:
