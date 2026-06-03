@@ -1,13 +1,15 @@
 import os
-import subprocess
 from pathlib import Path
 from typing import Literal
-from subprocess import TimeoutExpired
 from datetime import datetime, timezone
 from fastapi import HTTPException, status, BackgroundTasks
 from ..services.script_service import next_execution_log_id
 from ..repositories.mock_repository import EXECUTION_LOGS_DB
 from ..models.schemas import ExecutionLog, ExecuteScriptResponse, Script
+
+import docker
+from docker.errors import APIError, DockerException, NotFound
+from fastapi import BackgroundTasks, HTTPException, status
 
 
 # Status de erro
@@ -39,6 +41,10 @@ def save_execution_log(
 
     EXECUTION_LOGS_DB.append(execution_log)
     return execution_log
+
+
+def get_docker_client() -> docker.DockerClient:
+    return docker.from_env()
 
 
 def validade_script_for_validation(script: Script, args: list[str]) -> None:
@@ -75,12 +81,43 @@ def validade_script_for_validation(script: Script, args: list[str]) -> None:
         )
 
 
+def find_target_container(client: docker.DockerClient, target_container: str):
+    try:
+        return client.containers.get(target_container)
+    except NotFound:
+        pass
+
+    containers = client.containers.list(
+        all=True,
+        filters={"label": f"com.docker.compose.service={target_container}"},
+    )
+    if containers:
+        return containers[0]
+
+    containers = client.containers.list(all=True)
+    for container in containers:
+        if container.name == target_container or target_container in container.name:
+            return container
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Container {target_container} not found",
+    )
+
+
+def decode_bytes(value: bytes | None) -> str:
+    if not value:
+        return ""
+    return value.decode("utf-8", errors="replace")
+
+
 def run_script_flow(
         script: Script,
         target_container: str,
         args: list[str],
 ) -> tuple[int, str, str, str, Literal["started", "error"]]:
     parameters_used = " ".join(args) if args else ""
+    client = get_docker_client()
 
 
     # lógica de execução no para os outros containers
@@ -90,41 +127,79 @@ def run_script_flow(
     # output = ""         # saída padrão (fd 0)
     # output_error = ""   # saída de erro (fd 2)
 
-    command = [script.path, *args]
+    # command = [script.path, *args]
+
+#     try:
+#         result = subprocess.run(
+#             command,
+#             capture_output=True,
+#             text=True,
+#             check=False,
+#             timeout=60,
+#         )
+#
+#     # Vou mudar isso
+#     except TimeoutExpired:
+#         return (
+#             EXEC_STATUS_SCRIPT_ERROR,
+#             "",
+#             "Execução excedeu o tempo limite",
+#             parameters_used,
+#             "error",
+#         )
+#
+#     except:
+#         return (
+#             EXEC_STATUS_SCRIPT_ERROR,
+#             "",
+#             "Algo deu errado",
+#             parameters_used,
+#             "error",
+#         )
 
     try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
-        )
+        container = find_target_container(client, target_container)
+    except HTTPException:
+        raise
+    except DockerException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Erro ao localizar container {target_container}: {exc}",
+        ) from exc
 
-    # Vou mudar isso
-    except TimeoutExpired:
-        return (
-            EXEC_STATUS_SCRIPT_ERROR,
-            "",
-            "Execução excedeu o tempo limite",
-            parameters_used,
-            "error",
+    try:
+        exec_result = container.exec_run(
+            cmd=[script.path, *args],
+            stdout=True,
+            stderr=True,
+            demux=True,
+            workdir="/scripts",
         )
+    except APIError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Erro ao iniciar execução no container {target_container}: {exc.explanation or str(exc)}",
+        ) from exc
+    except DockerException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Erro ao executar script no container {target_container}: {exc}",
+        ) from exc
 
-    except:
-        return (
-            EXEC_STATUS_SCRIPT_ERROR,
-            "",
-            "Algo deu errado",
-            parameters_used,
-            "error",
-        )
+    stdout_bytes, stderr_bytes = (None, None)
+    if isinstance(exec_result.output, tuple):
+        stdout_bytes, stderr_bytes = exec_result.output
+    else:
+        stdout_bytes = exec_result.output
 
-    # Finalização, montar os logs e retornar
+    exit_code = exec_result.exit_code if exec_result.exit_code is not None else 1
+    output_log = decode_bytes(stdout_bytes)
+    output_error_log = decode_bytes(stderr_bytes)
+
     return (
-        result.returncode,
-        result.stdout,
-        result.stderr,
+        exit_code,
+        output_log,
+        output_error_log,
         parameters_used,
         "started",
     )
