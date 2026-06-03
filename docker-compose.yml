@@ -58,6 +58,14 @@ services:
       - ./script_tests:/scripts
     restart: unless-stopped
 
+  ubuntu:
+    image: ubuntu:24.04
+    container_name: ubuntu
+    restart: unless-stopped
+    command: tail -f /dev/null
+    volumes:
+      - ./script_tests:/scripts
+
 networks:
   default:
     name: orchestrator-test-net

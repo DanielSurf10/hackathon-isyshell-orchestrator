@@ -1,22 +1,22 @@
+import asyncio
 import os
-from pathlib import Path
-from typing import Literal
 from datetime import datetime, timezone
-from fastapi import HTTPException, status, BackgroundTasks
-from ..services.script_service import next_execution_log_id
-from ..repositories.mock_repository import EXECUTION_LOGS_DB
-from ..models.schemas import ExecutionLog, ExecuteScriptResponse, Script
+from pathlib import Path
+from typing import Any, Literal
 
 import docker
 from docker.errors import APIError, DockerException, NotFound
 from fastapi import BackgroundTasks, HTTPException, status
 
+from ..models.schemas import ExecutionLog, ExecuteScriptResponse, Script
+from ..notifications.dispatcher import AlertDispatcher
+from ..repositories.mock_repository import EXECUTION_LOGS_DB
+from ..services.script_service import next_execution_log_id
+
 
 # Status de erro
-EXEC_STATUS_QUEUED = 0
-EXEC_STATUS_SUCCESS = 1
-EXEC_STATUS_START_ERROR = 2
-EXEC_STATUS_SCRIPT_ERROR = 3
+EXEC_STATUS_SUCCESS = 0
+EXEC_STATUS_START_ERROR = -1
 
 
 def save_execution_log(
@@ -50,7 +50,7 @@ def get_docker_client() -> docker.DockerClient:
 def validade_script_for_validation(script: Script, args: list[str]) -> None:
     if not script.is_active:
         raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="A execução do script está desativada",
         )
 
@@ -111,51 +111,29 @@ def decode_bytes(value: bytes | None) -> str:
     return value.decode("utf-8", errors="replace")
 
 
+def build_alert_payload(
+    *,
+    script_id: int,
+    target_container: str,
+    status_code_value: int,
+    output_error_log: str,
+) -> dict[str, Any]:
+    return {
+        "script_id": script_id,
+        "target_container": target_container,
+        "status": status_code_value,
+        "output_error_log": output_error_log,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def run_script_flow(
-        script: Script,
-        target_container: str,
-        args: list[str],
-) -> tuple[int, str, str, str, Literal["started", "error"]]:
+    script: Script,
+    target_container: str,
+    args: list[str],
+) -> tuple[int, str, str, str]:
     parameters_used = " ".join(args) if args else ""
     client = get_docker_client()
-
-
-    # lógica de execução no para os outros containers
-    # mudar esses valores para os valores que vier da execução
-
-    # exec_status = 0     # exit code
-    # output = ""         # saída padrão (fd 0)
-    # output_error = ""   # saída de erro (fd 2)
-
-    # command = [script.path, *args]
-
-#     try:
-#         result = subprocess.run(
-#             command,
-#             capture_output=True,
-#             text=True,
-#             check=False,
-#             timeout=60,
-#         )
-#
-#     # Vou mudar isso
-#     except TimeoutExpired:
-#         return (
-#             EXEC_STATUS_SCRIPT_ERROR,
-#             "",
-#             "Execução excedeu o tempo limite",
-#             parameters_used,
-#             "error",
-#         )
-#
-#     except:
-#         return (
-#             EXEC_STATUS_SCRIPT_ERROR,
-#             "",
-#             "Algo deu errado",
-#             parameters_used,
-#             "error",
-#         )
 
     try:
         container = find_target_container(client, target_container)
@@ -196,34 +174,85 @@ def run_script_flow(
     output_log = decode_bytes(stdout_bytes)
     output_error_log = decode_bytes(stderr_bytes)
 
-    return (
-        exit_code,
-        output_log,
-        output_error_log,
-        parameters_used,
-        "started",
+    return exit_code, output_log, output_error_log, parameters_used
+
+
+async def dispatch_alert(dispatcher: AlertDispatcher, payload: dict[str, Any]) -> None:
+    await dispatcher.dispatch(payload)
+
+
+def dispatch_alert_in_background(dispatcher: AlertDispatcher, payload: dict[str, Any]) -> None:
+    asyncio.run(dispatch_alert(dispatcher, payload))
+
+
+def execute_script_in_background(
+    script: Script,
+    target_container: str,
+    args: list[str],
+    alert_dispatcher: AlertDispatcher,
+) -> None:
+    try:
+        status_code_value, output_log, output_error_log, parameters_used = run_script_flow(
+            script=script,
+            target_container=target_container,
+            args=args,
+        )
+    except HTTPException as exc:
+        status_code_value = EXEC_STATUS_START_ERROR
+        output_log = ""
+        output_error_log = str(exc.detail)
+        parameters_used = " ".join(args) if args else ""
+
+    save_execution_log(
+        script_id=script.id,
+        target_container=target_container,
+        parameters_used=parameters_used,
+        status=status_code_value,
+        output_log=output_log,
+        output_error_log=output_error_log,
     )
+
+    if status_code_value != EXEC_STATUS_SUCCESS:
+        asyncio.run(
+            alert_dispatcher.dispatch(
+                build_alert_payload(
+                    script_id=script.id,
+                    target_container=target_container,
+                    status_code_value=status_code_value,
+                    output_error_log=output_error_log,
+                )
+            )
+        )
 
 
 def execute_script_flow(
-        script: Script,
-        target_container: str,
-        args: list[str],
-        run_in_background: bool,
-        background_tasks: BackgroundTasks,
+    script: Script,
+    target_container: str,
+    args: list[str],
+    run_in_background: bool,
+    background_tasks: BackgroundTasks,
+    alert_dispatcher: AlertDispatcher,
 ) -> ExecuteScriptResponse:
 
     try:
         validade_script_for_validation(script, args)
     except HTTPException as exc:
+        status_code_value = EXEC_STATUS_START_ERROR
         save_execution_log(
             script_id=script.id,
             target_container=target_container,
             parameters_used=(" ".join(args) if args else ""),
-            status=EXEC_STATUS_START_ERROR,
+            status=status_code_value,
             output_log="",
             output_error_log=str(exc.detail),
         )
+        payload = build_alert_payload(
+            script_id=script.id,
+            target_container=target_container,
+            status_code_value=status_code_value,
+            output_error_log=str(exc.detail),
+        )
+        background_tasks.add_task(dispatch_alert_in_background, alert_dispatcher, payload)
         return ExecuteScriptResponse(
             status="error",
             message=str(exc.detail),
@@ -234,10 +263,11 @@ def execute_script_flow(
 
     if run_in_background:
         background_tasks.add_task(
-            run_script_flow,
+            execute_script_in_background,
             script,
             target_container,
             args,
+            alert_dispatcher,
         )
         return ExecuteScriptResponse(
             status="started",
@@ -247,7 +277,7 @@ def execute_script_flow(
             time_stamp=datetime.now(timezone.utc),
         )
 
-    status_code_value, output_log, output_error_log, parameters_used, response_status = run_script_flow(
+    status_code_value, output_log, output_error_log, parameters_used = run_script_flow(
         script=script,
         target_container=target_container,
         args=args
@@ -262,9 +292,22 @@ def execute_script_flow(
         output_error_log=output_error_log,
     )
 
+    if status_code_value != EXEC_STATUS_SUCCESS:
+        payload = build_alert_payload(
+            script_id=script.id,
+            target_container=target_container,
+            status_code_value=status_code_value,
+            output_error_log=output_error_log,
+        )
+        background_tasks.add_task(dispatch_alert_in_background, alert_dispatcher, payload)
+
     return ExecuteScriptResponse(
-        status=response_status,
-        message="Script inciado com sucesso.",
+        status="started",
+        message=(
+            "Script executado com sucesso."
+            if status_code_value == EXEC_STATUS_SUCCESS
+            else f"Script executado com erro interno. Exit code: {status_code_value}"
+        ),
         script_id=script.id,
         target_container=target_container,
         time_stamp=datetime.now(timezone.utc),
