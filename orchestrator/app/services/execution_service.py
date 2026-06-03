@@ -2,16 +2,17 @@ import asyncio
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import docker
 from docker.errors import APIError, DockerException, NotFound
 from fastapi import BackgroundTasks, HTTPException, status
+from sqlalchemy.orm import Session
 
-from ..models.schemas import ExecutionLog, ExecuteScriptResponse, Script
+from ..db.models import ScriptORM
+from ..models.schemas import ExecuteScriptResponse
+from ..repositories.database_repository import create_execution_log
 from ..notifications.dispatcher import AlertDispatcher
-from ..repositories.mock_repository import EXECUTION_LOGS_DB
-from ..services.script_service import next_execution_log_id
 
 
 # Status de erro
@@ -27,9 +28,9 @@ def save_execution_log(
         status: int,
         output_log: str,
         output_error_log: str,
-) -> ExecutionLog:
-    execution_log = ExecutionLog(
-        id=next_execution_log_id(),
+        db: Session | None = None,
+):
+    execution_log = create_execution_log(
         script_id=script_id,
         target_container=target_container,
         parameters_used=parameters_used,
@@ -37,9 +38,8 @@ def save_execution_log(
         output_log=output_log,
         output_error_log=output_error_log,
         executed_at=datetime.now(timezone.utc),
+        db=db,
     )
-
-    EXECUTION_LOGS_DB.append(execution_log)
     return execution_log
 
 
@@ -47,7 +47,7 @@ def get_docker_client() -> docker.DockerClient:
     return docker.from_env()
 
 
-def validade_script_for_validation(script: Script, args: list[str]) -> None:
+def validade_script_for_validation(script: ScriptORM, args: list[str]) -> None:
     if not script.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -128,7 +128,7 @@ def build_alert_payload(
 
 
 def run_script_flow(
-    script: Script,
+    script,
     target_container: str,
     args: list[str],
 ) -> tuple[int, str, str, str]:
@@ -186,7 +186,7 @@ def dispatch_alert_in_background(dispatcher: AlertDispatcher, payload: dict[str,
 
 
 def execute_script_in_background(
-    script: Script,
+    script: ScriptORM,
     target_container: str,
     args: list[str],
     alert_dispatcher: AlertDispatcher,
@@ -226,12 +226,13 @@ def execute_script_in_background(
 
 
 def execute_script_flow(
-    script: Script,
+    script: ScriptORM,
     target_container: str,
     args: list[str],
     run_in_background: bool,
     background_tasks: BackgroundTasks,
     alert_dispatcher: AlertDispatcher,
+    db: Session | None = None,
 ) -> ExecuteScriptResponse:
 
     try:
@@ -245,6 +246,7 @@ def execute_script_flow(
             status=status_code_value,
             output_log="",
             output_error_log=str(exc.detail),
+            db=db,
         )
         payload = build_alert_payload(
             script_id=script.id,
@@ -290,6 +292,7 @@ def execute_script_flow(
         status=status_code_value,
         output_log=output_log,
         output_error_log=output_error_log,
+        db=db,
     )
 
     if status_code_value != EXEC_STATUS_SUCCESS:

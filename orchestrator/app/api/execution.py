@@ -1,4 +1,5 @@
 from ..core.sercurity import require_auth
+from ..db.database import get_db
 from typing import Annotated, Any
 from ..notifications.dispatcher import AlertDispatcher
 from ..notifications.factory import get_alert_dispatcher
@@ -6,6 +7,7 @@ from ..services.script_service import get_script_by_id
 from ..services.execution_service import execute_script_flow
 from ..models.schemas import ExecuteScriptResponse, ExecuteScriptRequest, ExecuteScriptManyRequest
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks, Depends
+from sqlalchemy.orm import Session
 
 execution_router = APIRouter()
 
@@ -14,10 +16,11 @@ execution_router = APIRouter()
 def execute_script(
     body: ExecuteScriptRequest,
     background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
     _: Annotated[dict[str, Any], Depends(require_auth)],
     alert_dispatcher: Annotated[AlertDispatcher, Depends(get_alert_dispatcher)],
 ) -> ExecuteScriptResponse:
-    script = get_script_by_id(body.script_id)
+    script = get_script_by_id(body.script_id, db)
 
     if script is None:
         raise HTTPException(
@@ -31,6 +34,7 @@ def execute_script(
         body.run_in_background,
         background_tasks,
         alert_dispatcher,
+        db,
     )
 
 
@@ -38,10 +42,11 @@ def execute_script(
 def execute_script_many(
     body: ExecuteScriptManyRequest,
     background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
     _: Annotated[dict[str, Any], Depends(require_auth)],
     alert_dispatcher: Annotated[AlertDispatcher, Depends(get_alert_dispatcher)],
 ) -> list[ExecuteScriptResponse]:
-    script = get_script_by_id(body.script_id)
+    script = get_script_by_id(body.script_id, db)
 
     if script is None:
         raise HTTPException(
@@ -60,6 +65,7 @@ def execute_script_many(
                 True,
                 background_tasks,
                 alert_dispatcher,
+                db,
             )
         )
 

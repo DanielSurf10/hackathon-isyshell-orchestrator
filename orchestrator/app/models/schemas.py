@@ -1,9 +1,11 @@
 from typing import Literal
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Script(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     description: str
@@ -14,6 +16,8 @@ class Script(BaseModel):
 
 
 class ExecutionLog(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     script_id: int
     target_container: str

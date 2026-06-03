@@ -8,8 +8,17 @@ from .api.execution import execution_router
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from fastapi.responses import FileResponse
+from .db.database import SessionLocal, init_db
+from .db.seed import seed_database
 
 app = FastAPI(title="Orchestrator", version="0.1.0")
+
+
+@app.on_event("startup")
+def startup_event() -> None:
+    init_db()
+    with SessionLocal() as db:
+        seed_database(db)
 
 app.add_middleware(
     CORSMiddleware,

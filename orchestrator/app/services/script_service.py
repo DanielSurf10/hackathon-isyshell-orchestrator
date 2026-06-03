@@ -1,10 +1,8 @@
-from ..repositories.mock_repository import SCRIPTS_DB, EXECUTION_LOGS_DB
-from ..models.schemas import Script
+from sqlalchemy.orm import Session
+
+from ..db.models import ScriptORM
+from ..repositories.database_repository import get_script_by_id as get_script_by_id_repository
 
 
-def get_script_by_id(script_id: int) -> Script | None:
-    return next((script for script in SCRIPTS_DB if script.id == script_id), None)
-
-
-def next_execution_log_id() -> int:
-    return max((log.id for log in EXECUTION_LOGS_DB), default=0) + 1
+def get_script_by_id(script_id: int, db: Session | None = None) -> ScriptORM | None:
+    return get_script_by_id_repository(script_id, db)
